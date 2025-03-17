@@ -41,13 +41,14 @@ def ocr_page(page):
         return ""
 
 
-def split_pdf_by_chapters(pdf_path, output_text_files=False):
+def split_pdf_by_chapters(pdf_path, output_text_files=False, output_pdf_files=True):  # Added output_pdf_files
     """
     Splits a PDF into separate chapter PDFs and optionally extracts chapter text.
 
     Args:
         pdf_path (str): Path to the input PDF file.
         output_text_files (bool, optional): Whether to generate text files for each chapter. Defaults to False.
+        output_pdf_files (bool, optional): Whether to generate PDF files for each chapter. Defaults to True.
     """
     try:
         # Open the PDF document
@@ -105,9 +106,10 @@ def split_pdf_by_chapters(pdf_path, output_text_files=False):
             raise ValueError("Invalid chapter sequence detected")
 
         # Create output directories if they don't exist
-        os.makedirs("chapters", exist_ok=True)
+        if output_pdf_files:  # Only create if the flag is True
+            os.makedirs("Output/chapters", exist_ok=True)
         if output_text_files:
-            os.makedirs("chapter_texts", exist_ok=True)
+            os.makedirs("Output/chapter_texts", exist_ok=True)
 
         # Iterate through the identified chapters and create separate PDF files
         for i, ch in enumerate(chapters):
@@ -118,10 +120,12 @@ def split_pdf_by_chapters(pdf_path, output_text_files=False):
             if end - start < 1:
                 continue
 
-            # Create a new PDF document for the chapter
-            output = fitz.open()
-            output.insert_pdf(doc, from_page=start, to_page=end)
-            output.save(f"chapters/{ch['title']}.pdf")
+            if output_pdf_files: # Only create PDF if the flag is true
+                # Create a new PDF document for the chapter
+                output = fitz.open()
+                output.insert_pdf(doc, from_page=start, to_page=end)
+                output.save(f"Output/chapters/{ch['title']}.pdf")
+
 
             # Optionally, generate text files for each chapter
             if output_text_files:
@@ -135,7 +139,7 @@ def split_pdf_by_chapters(pdf_path, output_text_files=False):
                     chapter_text += text + "\n\n"
 
                 # Save the extracted text to a file
-                text_filename = f"chapter_texts/{ch['title']}.txt"
+                text_filename = f"Output/chapter_texts/{ch['title']}.txt"
                 with open(text_filename, 'w', encoding='utf-8') as f:
                     f.write(chapter_text)
 
@@ -146,4 +150,4 @@ def split_pdf_by_chapters(pdf_path, output_text_files=False):
 
 
 if __name__ == "__main__":
-    split_pdf_by_chapters("Documents/CCSK Study Guide.pdf", output_text_files=True)
+    split_pdf_by_chapters("Documents/CCSK Study Guide.pdf", output_text_files=True, output_pdf_files=True)
