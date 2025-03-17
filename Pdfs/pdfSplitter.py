@@ -8,9 +8,7 @@ import numpy as np
 import sys
 import os
 
-
 pytesseract.pytesseract.tesseract_cmd = r'C:/Program Files/Tesseract-OCR/tesseract.exe'
-
 
 
 def ocr_page(page):
@@ -57,7 +55,7 @@ def split_pdf_by_chapters(pdf_path, output_text_files=False):
         chapters = []  # List to store chapter information
         # Regular expression to match chapter headings (e.g., "Domain 1: Chapter Title")
         pattern = re.compile(
-            r"^\s*Domain\s+\d+:\s*([A-Z][A-Za-z0-9\s&\-/]+)(?=\s*$|\.?\s|$)",
+            r"(?<!\S)Domain\s+\d{1,2}:\s*([A-Za-z0-9&\s]+)(?=\s*[\.\s]?$)",
             re.IGNORECASE
         )
 
