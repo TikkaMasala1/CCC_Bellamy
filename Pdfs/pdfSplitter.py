@@ -55,8 +55,11 @@ def split_pdf_by_chapters(pdf_path, output_text_files=False):
         chapters = []  # List to store chapter information
         # Regular expression to match chapter headings (e.g., "Domain 1: Chapter Title")
         pattern = re.compile(
-            r"(?<!\S)Domain\s+\d{1,2}:\s*([A-Za-z0-9&\s]+)(?=\s*[\.\s]?$)",
-            re.IGNORECASE
+
+            r"^Domain\s+\d+:\s*([A-Z][\w\s\-,&]+)(?:\n\s*([A-Z][\w\s\-,&]+))*",
+
+            re.MULTILINE | re.IGNORECASE
+
         )
 
         # Iterate through each page of the PDF
@@ -143,5 +146,4 @@ def split_pdf_by_chapters(pdf_path, output_text_files=False):
 
 
 if __name__ == "__main__":
-    # Example usage: split "CCSK Study Guide.pdf" into chapters and generate text files
-    split_pdf_by_chapters("CCSK Study Guide.pdf", output_text_files=True)
+    split_pdf_by_chapters("Documents/CCSK Study Guide.pdf", output_text_files=True)
