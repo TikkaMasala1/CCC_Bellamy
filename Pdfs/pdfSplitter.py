@@ -86,14 +86,13 @@ def process_pdf(pdf_path, instruction_key):
 
 
 if __name__ == "__main__":
-    process_pdf("Documents/Zero_Trust_Implementation_Study_Guide.pdf", "Zero Trust Implementation")
-    # if len(sys.argv) != 3:
-    #     print("Usage: ./pdfSplitter.py <pdf-file> <instruction-key>")
-    #     sys.exit(1)
-    #
-    # try:
-    #     process_pdf(sys.argv[1], sys.argv[2])
-    #     print("Successfully split PDF into chapters")
-    # except Exception as e:
-    #     print(f"Error: {str(e)}")
-    #     sys.exit(1)
+    if len(sys.argv) != 3:
+        print("Usage: ./pdfSplitter.py <pdf-file> <instruction-key>")
+        sys.exit(1)
+
+    try:
+        process_pdf(sys.argv[1], sys.argv[2])
+        print("Successfully split PDF into chapters")
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        sys.exit(1)
