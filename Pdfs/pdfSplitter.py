@@ -1,153 +1,99 @@
-import fitz
-import re
-import pytesseract
-from PIL import Image
-import io
-import cv2
-import numpy as np
 import sys
+import re
+import fitz
 import os
 
-pytesseract.pytesseract.tesseract_cmd = r'C:/Program Files/Tesseract-OCR/tesseract.exe'
+# Hardcoded document instructions
+DOCUMENT_INSTRUCTIONS = {
+    'CCSK': {
+        'skip_pages': 7,
+        'regex_pattern': r'^Domain\s+[IVXLCDM\d]+:\s*[^.]+(?=\n\s*[A-Z0-9]|\Z)',
+        'flags': re.MULTILINE
+    },
+
+    'Zero Trust Planning': {
+        'skip_pages': 8,
+        'regex_pattern': r'^\d+\s+(?!.*\(\d{4}[^)]*\))(?!.*Retrieved\s+\d{4})[A-Z].+',
+        'flags': re.MULTILINE
+    },
+
+    'Zero Trust Strategy': {
+        'skip_pages': 8,
+        'regex_pattern': r'^\d+\s+(?!.*(?:Note:|See|Pg\.|In some|To learn|Learn more|is (?:designed to|United States legislation)|\(\w+\)|they\b|have created|as many|familiarize))[A-Z][A-Za-z, &-]+(?<!\.)$',
+        'flags': re.MULTILINE
+    },
+
+    'Zero Trust Implementation': {
+        'skip_pages': 8,
+        'regex_pattern': r'^\d+\s+(?!.*(?:\(\d{4}[^)]*\)|Retrieved\s+\d{4}|Learn\s+more|Note:|https?://))[A-Z][A-Za-z].+',
+        'flags': re.MULTILINE
+    }
+}
 
 
-def ocr_page(page):
+def process_pdf(pdf_path, instruction_key):
     """
-    Performs OCR on a given page of a PDF.
+    Processes a PDF, extracts text, and splits it into chapters using regex.
 
     Args:
-        page (fitz.Page): The page object from PyMuPDF.
-
-    Returns:
-        str: The extracted text from the page, or an empty string if OCR fails.
+        pdf_path (str): Path to the PDF file.
+        instruction_key (str): Key to the document instructions.
     """
+
+    # Get document-specific instructions
+    instructions = DOCUMENT_INSTRUCTIONS.get(instruction_key)
+    if not instructions:
+        raise ValueError(f"No instructions found for key: {instruction_key}")
+
+    # Compile regex pattern
+    pattern = re.compile(
+        instructions['regex_pattern'],
+        flags=instructions.get('flags', 0)
+    )
+
     try:
-        # Convert PDF page to image
-        pix = page.get_pixmap()
-        img_bytes = pix.tobytes("png")
-        img = Image.open(io.BytesIO(img_bytes))
-        img_np = np.array(img)
-
-        # Convert image to grayscale and apply thresholding for better OCR
-        gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
-        _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
-        img_processed = Image.fromarray(thresh)
-
-        # Perform OCR using Tesseract
-        text = pytesseract.image_to_string(img_processed)
-        return text.strip()
-    except Exception as e:
-        print(f"OCR failed on page {page.number}: {e}")
-        return ""
-
-
-def split_pdf_by_chapters(pdf_path, output_text_files=False, output_pdf_files=True):  # Added output_pdf_files
-    """
-    Splits a PDF into separate chapter PDFs and optionally extracts chapter text.
-
-    Args:
-        pdf_path (str): Path to the input PDF file.
-        output_text_files (bool, optional): Whether to generate text files for each chapter. Defaults to False.
-        output_pdf_files (bool, optional): Whether to generate PDF files for each chapter. Defaults to True.
-    """
-    try:
-        # Open the PDF document
         doc = fitz.open(pdf_path)
-        chapters = []  # List to store chapter information
-        # Regular expression to match chapter headings (e.g., "Domain 1: Chapter Title")
-        pattern = re.compile(
-
-            r"^Domain\s+\d+:\s*([A-Z][\w\s\-,&]+)(?:\n\s*([A-Z][\w\s\-,&]+))*",
-
-            re.MULTILINE | re.IGNORECASE
-
-        )
-
-        # Iterate through each page of the PDF
-        for page_num in range(len(doc)):
-            page = doc.load_page(page_num)
-            text_blocks = page.get_text("blocks")  # Extract text blocks from the page
-
-            # Check only the top 20% of the page for chapter headings
-            top_region = page.rect.height * 0.2
-            chapter_candidates = []
-
-            # Extract potential chapter headings from the top region
-            for block in text_blocks:
-                x0, y0, x1, y1, text, _, _ = block
-                if y0 < top_region:
-                    chapter_candidates.extend(text.split('\n'))
-
-            # Fallback to OCR if no text is found in the top region
-            if not chapter_candidates:
-                text = ocr_page(page)
-                chapter_candidates = text.split('\n')[:3]  # Check the first 3 lines from OCR
-
-            # Check if any of the candidate lines match the chapter heading pattern
-            match_found = False
-            for line in chapter_candidates:
-                clean_line = line.strip()
-                if pattern.fullmatch(clean_line):
-                    # Sanitize the chapter title for use as a filename
-                    sanitized = re.sub(r'\W+', '_', clean_line)
-                    chapters.append({
-                        'title': sanitized,
-                        'start_page': page_num
-                    })
-                    match_found = True
-                    break
-
-        # Validate chapter sequence to ensure chapters are in increasing page order.
-        valid_structure = True
-        for i in range(1, len(chapters)):
-            if chapters[i]['start_page'] <= chapters[i - 1]['start_page']:
-                valid_structure = False
-        if not valid_structure:
-            raise ValueError("Invalid chapter sequence detected")
-
-        # Create output directories if they don't exist
-        if output_pdf_files:  # Only create if the flag is True
-            os.makedirs("Output/chapters", exist_ok=True)
-        if output_text_files:
-            os.makedirs("Output/chapter_texts", exist_ok=True)
-
-        # Iterate through the identified chapters and create separate PDF files
-        for i, ch in enumerate(chapters):
-            start = ch['start_page']
-            end = chapters[i + 1]['start_page'] - 1 if i < len(chapters) - 1 else len(doc) - 1
-
-            # Validate minimum chapter length (skip if chapter is too short)
-            if end - start < 1:
-                continue
-
-            if output_pdf_files: # Only create PDF if the flag is true
-                # Create a new PDF document for the chapter
-                output = fitz.open()
-                output.insert_pdf(doc, from_page=start, to_page=end)
-                output.save(f"Output/chapters/{ch['title']}.pdf")
-
-
-            # Optionally, generate text files for each chapter
-            if output_text_files:
-                chapter_text = ""
-                # Extract text from each page of the chapter
-                for page_num in range(start, end + 1):
-                    page = doc.load_page(page_num)
-                    text = page.get_text().strip()
-                    if not text:
-                        text = ocr_page(page)  # Fallback to OCR if no text is found
-                    chapter_text += text + "\n\n"
-
-                # Save the extracted text to a file
-                text_filename = f"Output/chapter_texts/{ch['title']}.txt"
-                with open(text_filename, 'w', encoding='utf-8') as f:
-                    f.write(chapter_text)
-
-        doc.close()  # Close the input PDF document
     except Exception as e:
-        print(f"Error: {e}")
-        sys.exit(1)  # Exit the program if an error occurs
+        raise ValueError(f"Error opening PDF: {e}")
+
+    # Extract text from PDF
+    full_text = ""
+    for page_num in range(instructions['skip_pages'], doc.page_count):
+        page = doc[page_num]
+        full_text += page.get_text("text") + "\n"  # add newline for proper multiline regex.
+
+    doc.close()
+
+    # Split text into chapters using regex
+    matches = list(pattern.finditer(full_text))
+    if not matches:
+        raise ValueError("No chapter matches found in the text")
+
+    chapters = []
+    for i, match in enumerate(matches):
+        start = match.start()
+        end = matches[i + 1].start() if i < len(matches) - 1 else len(full_text)
+        chapters.append(full_text[start:end])
+
+    # Write chapters to files
+    base_filename = os.path.splitext(os.path.basename(pdf_path))[0]  # Get filename without extension
+
+    os.makedirs(f"Output/{base_filename}", exist_ok=True)
+
+    for idx, chapter in enumerate(chapters, 1):
+        with open(f"Output/{base_filename}/chapter_{idx}.txt", 'w', encoding="utf-8") as f:  # added encoding
+            f.write(chapter)
 
 
 if __name__ == "__main__":
-    split_pdf_by_chapters("Documents/CCSK Study Guide.pdf", output_text_files=True, output_pdf_files=True)
+    process_pdf("Documents/Zero_Trust_Implementation_Study_Guide.pdf", "Zero Trust Implementation")
+    # if len(sys.argv) != 3:
+    #     print("Usage: ./pdfSplitter.py <pdf-file> <instruction-key>")
+    #     sys.exit(1)
+    #
+    # try:
+    #     process_pdf(sys.argv[1], sys.argv[2])
+    #     print("Successfully split PDF into chapters")
+    # except Exception as e:
+    #     print(f"Error: {str(e)}")
+    #     sys.exit(1)
