@@ -3,30 +3,41 @@ import re
 import fitz
 import os
 
-# Hardcoded document instructions
 DOCUMENT_INSTRUCTIONS = {
     'CCSK': {
         'skip_pages': 7,
         'regex_pattern': r'^Domain\s+[IVXLCDM\d]+:\s*[^.]+(?=\n\s*[A-Z0-9]|\Z)',
-        'flags': re.MULTILINE
+        'flags': re.MULTILINE,
+        'footer_margin': 75,
+        'subchapter_regex_pattern': r'^\s*(\d+\.)+\d+\s+[A-Z][A-Za-z. &-]+',
+        'subchapter_flags': re.MULTILINE
     },
 
     'Zero Trust Planning': {
-        'skip_pages': 8,
+        'skip_pages': 9,
         'regex_pattern': r'^\d+\s+(?!.*\(\d{4}[^)]*\))(?!.*Retrieved\s+\d{4})[A-Z].+',
-        'flags': re.MULTILINE
+        'flags': re.MULTILINE,
+        'footer_margin': 75,
+        'subchapter_regex_pattern': r'^\s*(\d+\.)+\d+\s+[A-Z][A-Za-z. &-]+',
+        'subchapter_flags': re.MULTILINE
     },
 
     'Zero Trust Strategy': {
-        'skip_pages': 8,
+        'skip_pages': 9,
         'regex_pattern': r'^\d+\s+(?!.*(?:Note:|See|Pg\.|In some|To learn|Learn more|is (?:designed to|United States legislation)|\(\w+\)|they\b|have created|as many|familiarize))[A-Z][A-Za-z, &-]+(?<!\.)$',
-        'flags': re.MULTILINE
+        'flags': re.MULTILINE,
+        'footer_margin': 75,
+        'subchapter_regex_pattern': r'^\s*(\d+\.)+\d+\s+[A-Z][A-Za-z. &-]+',
+        'subchapter_flags': re.MULTILINE
     },
 
     'Zero Trust Implementation': {
         'skip_pages': 8,
         'regex_pattern': r'^\d+\s+(?!.*(?:\(\d{4}[^)]*\)|Retrieved\s+\d{4}|Learn\s+more|Note:|https?://))[A-Z][A-Za-z].+',
-        'flags': re.MULTILINE
+        'flags': re.MULTILINE,
+        'footer_margin': 75,
+        'subchapter_regex_pattern': r'^\s*(\d+\.)+\d+\s+[A-Z][A-Za-z. &-]+',
+        'subchapter_flags': re.MULTILINE
     }
 }
 
@@ -39,14 +50,12 @@ def process_pdf(pdf_path, instruction_key):
         pdf_path (str): Path to the PDF file.
         instruction_key (str): Key to the document instructions.
     """
-
-    # Get document-specific instructions
     instructions = DOCUMENT_INSTRUCTIONS.get(instruction_key)
     if not instructions:
         raise ValueError(f"No instructions found for key: {instruction_key}")
 
-    # Compile regex pattern
-    pattern = re.compile(
+    # Simplified chapter pattern
+    chapter_pattern = re.compile(
         instructions['regex_pattern'],
         flags=instructions.get('flags', 0)
     )
@@ -56,33 +65,66 @@ def process_pdf(pdf_path, instruction_key):
     except Exception as e:
         raise ValueError(f"Error opening PDF: {e}")
 
-    # Extract text from PDF
+    # Extract text from PDF with minimal preprocessing
     full_text = ""
+    footer_margin = instructions['footer_margin']  # Get the footer margin
+
     for page_num in range(instructions['skip_pages'], doc.page_count):
         page = doc[page_num]
-        full_text += page.get_text("text") + "\n"  # add newline for proper multiline regex.
+        # Define the area to clip (excluding footer)
+        page_rect = page.rect
+        clip_rect = fitz.Rect(0, 0, page_rect.width, page_rect.height - footer_margin)
+        # Extract text from the clipped area
+        text = page.get_text("text", clip=clip_rect)
+        full_text += text + "\n"
 
-    doc.close()
-
-    # Split text into chapters using regex
-    matches = list(pattern.finditer(full_text))
-    if not matches:
-        raise ValueError("No chapter matches found in the text")
-
+    # Improved chapter splitting
     chapters = []
-    for i, match in enumerate(matches):
+    last_pos = 0
+    for match in chapter_pattern.finditer(full_text):
         start = match.start()
-        end = matches[i + 1].start() if i < len(matches) - 1 else len(full_text)
-        chapters.append(full_text[start:end])
+        if start > last_pos:
+            chapters.append(full_text[last_pos:start])
+        last_pos = start
+    chapters.append(full_text[last_pos:])
 
-    # Write chapters to files
-    base_filename = os.path.splitext(os.path.basename(pdf_path))[0]  # Get filename without extension
+    # Process chapters
+    base_filename = os.path.splitext(os.path.basename(pdf_path))[0]
+    output_dir = os.path.join("Output", base_filename)
+    os.makedirs(output_dir, exist_ok=True)
 
-    os.makedirs(f"Output/{base_filename}", exist_ok=True)
+    subchapter_pattern = re.compile(
+        instructions.get('subchapter_regex_pattern', r'^$'),
+        flags=instructions.get('subchapter_flags', 0)
+    )
 
-    for idx, chapter in enumerate(chapters, 1):
-        with open(f"Output/{base_filename}/chapter_{idx}.txt", 'w', encoding="utf-8") as f:  # added encoding
-            f.write(chapter)
+    for idx, chapter_text in enumerate(chapters, 1):
+        # Split subchapters
+        subchapters = []
+        last_sub_pos = 0
+        for match in subchapter_pattern.finditer(chapter_text):
+            start = match.start()
+            if start > last_sub_pos:
+                subchapters.append(chapter_text[last_sub_pos:start])
+            last_sub_pos = start
+        subchapters.append(chapter_text[last_sub_pos:])
+
+        # Save subchapters
+        chapter_dir = os.path.join(output_dir, f"chapter_{idx}")
+        os.makedirs(chapter_dir, exist_ok=True)
+
+        for sub_idx, sub_text in enumerate(subchapters, 1):
+            # Extract the first line of sub_text to use as file name
+            stripped_text = sub_text.strip()
+            first_line = stripped_text.splitlines()[0] if stripped_text else ""
+            # Sanitize the first line to remove invalid filename characters
+            safe_name = re.sub(r'[\\/*?:"<>|]', "", first_line)
+            # Fallback if the sanitized first line is empty
+            if not safe_name:
+                safe_name = f"subchapter_{sub_idx}"
+            # Save the file using the sanitized first line as the file name
+            with open(os.path.join(chapter_dir, f"{safe_name}.txt"), 'w', encoding='utf-8') as f:
+                f.write(sub_text.strip())
 
 
 if __name__ == "__main__":
@@ -92,7 +134,7 @@ if __name__ == "__main__":
 
     try:
         process_pdf(sys.argv[1], sys.argv[2])
-        print("Successfully split PDF into chapters")
+        print("Successfully split PDF into chapters and subchapters")
     except Exception as e:
         print(f"Error: {str(e)}")
         sys.exit(1)
